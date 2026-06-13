@@ -1,0 +1,8 @@
+node_modules/
+.env
+.env.local
+site-profile.json
+published.json
+audit-report.json
+*.html
+dist/
