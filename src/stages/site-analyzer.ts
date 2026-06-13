@@ -8,7 +8,7 @@
  * - Top competitor URLs (inferred from external links + Claude reasoning)
  */
 
-import 'dotenv/config';
+
 import Anthropic from '@anthropic-ai/sdk';
 import { crawlPage } from '../lib/crawler.js';
 import { logger } from '../lib/logger.js';

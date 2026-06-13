@@ -9,7 +9,7 @@
  *   - Supabase rows (shop/city page metadata)
  */
 
-import 'dotenv/config';
+
 import Anthropic from '@anthropic-ai/sdk';
 import * as readline from 'readline';
 import { logger } from '../lib/logger.js';

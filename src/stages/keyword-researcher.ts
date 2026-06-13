@@ -7,7 +7,7 @@
  * 4. Returns ranked keyword list ready for the Content Planner
  */
 
-import 'dotenv/config';
+
 import Anthropic from '@anthropic-ai/sdk';
 import { logger } from '../lib/logger.js';
 import { analyzeSite } from './site-analyzer.js';

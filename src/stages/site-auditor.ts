@@ -5,7 +5,7 @@
  * Outputs a prioritized fix list grouped by severity: critical, warning, recommendation.
  */
 
-import 'dotenv/config';
+
 import Anthropic from '@anthropic-ai/sdk';
 import { crawlPage } from '../lib/crawler.js';
 import { logger } from '../lib/logger.js';

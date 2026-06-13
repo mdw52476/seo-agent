@@ -5,7 +5,9 @@
  *   tsx src/index.ts analyze <url>
  */
 
-import 'dotenv/config';
+import dotenv from 'dotenv';
+import { join } from 'path';
+dotenv.config({ path: join(process.cwd(), '.env'), override: true });
 import { analyzeSite } from './stages/site-analyzer.js';
 import { researchKeywords } from './stages/keyword-researcher.js';
 import { buildContentPlan, printCalendar } from './stages/content-planner.js';

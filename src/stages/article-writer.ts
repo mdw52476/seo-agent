@@ -6,7 +6,7 @@
  * Returns a finished Article ready for publishing
  */
 
-import 'dotenv/config';
+
 import Anthropic from '@anthropic-ai/sdk';
 import { logger } from '../lib/logger.js';
 import { analyzeSite } from './site-analyzer.js';

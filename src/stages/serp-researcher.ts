@@ -8,7 +8,7 @@
  * "Best X in City" directories.
  */
 
-import 'dotenv/config';
+
 import Anthropic from '@anthropic-ai/sdk';
 import * as cheerio from 'cheerio';
 import { logger } from '../lib/logger.js';

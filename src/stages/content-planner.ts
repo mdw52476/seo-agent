@@ -6,7 +6,7 @@
  * Claude generates a compelling title + outline for each article.
  */
 
-import 'dotenv/config';
+
 import Anthropic from '@anthropic-ai/sdk';
 import { logger } from '../lib/logger.js';
 import { analyzeSite } from './site-analyzer.js';

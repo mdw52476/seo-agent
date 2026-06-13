@@ -11,7 +11,7 @@
  *   GITHUB_CONTENT_PATH — default: content/posts
  */
 
-import 'dotenv/config';
+
 import { logger } from '../lib/logger.js';
 import type { Article } from '../lib/types.js';
 
@@ -190,9 +190,9 @@ export default function BlogPage() {
 
   return (
     <main className="max-w-3xl mx-auto px-4 py-12">
-      <h1 className="text-3xl font-bold mb-2">Auto Glass Blog</h1>
+      <h1 className="text-3xl font-bold mb-2">Blog</h1>
       <p className="text-gray-500 mb-10">
-        Local guides, pricing tips, and shop directories across Ohio.
+        Articles, guides, and resources.
       </p>
       {posts.length === 0 ? (
         <p className="text-gray-400">No posts yet — check back soon.</p>
