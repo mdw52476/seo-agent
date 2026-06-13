@@ -54,27 +54,33 @@ function auditPage(page: PageData, keyword?: string): AuditIssue[] {
   const issues: AuditIssue[] = [];
   const p = page.url;
 
+  // Only blog posts (/blog/slug) map to editable MDX files — everything else
+  // is a TSX page that the auto-fixer cannot safely modify.
+  const urlPath   = p.replace(/^https?:\/\/[^/]+/, '');
+  const isBlogPost = urlPath.startsWith('/blog/') && urlPath.length > '/blog/'.length;
+  const canAutoFix = isBlogPost; // TSX pages: manual only
+
   // Title checks
   if (!page.title) {
-    issues.push({ severity: 'critical', page: p, rule: 'Missing title tag', detail: 'Page has no <title>', fix: `Add a descriptive title tag (50-65 chars)`, autoFixable: true });
+    issues.push({ severity: 'critical', page: p, rule: 'Missing title tag', detail: 'Page has no <title>', fix: `Add a descriptive title tag (50-65 chars)`, autoFixable: canAutoFix });
   } else if (page.title.length < 30) {
-    issues.push({ severity: 'warning', page: p, rule: 'Title too short', detail: `Title is ${page.title.length} chars: "${page.title}"`, fix: 'Expand title to 50-65 characters with keyword', autoFixable: true });
+    issues.push({ severity: 'warning', page: p, rule: 'Title too short', detail: `Title is ${page.title.length} chars: "${page.title}"`, fix: 'Expand title to 50-65 characters with keyword', autoFixable: canAutoFix });
   } else if (page.title.length > 65) {
-    issues.push({ severity: 'warning', page: p, rule: 'Title too long', detail: `Title is ${page.title.length} chars — will be truncated in SERPs`, fix: 'Shorten title to under 65 characters', autoFixable: true });
+    issues.push({ severity: 'warning', page: p, rule: 'Title too long', detail: `Title is ${page.title.length} chars — will be truncated in SERPs`, fix: 'Shorten title to under 65 characters', autoFixable: canAutoFix });
   }
 
   // Meta description checks
   if (!page.metaDescription) {
-    issues.push({ severity: 'critical', page: p, rule: 'Missing meta description', detail: 'No meta description found', fix: 'Add a meta description (150-160 chars) summarising the page', autoFixable: true });
+    issues.push({ severity: 'critical', page: p, rule: 'Missing meta description', detail: 'No meta description found', fix: 'Add a meta description (150-160 chars) summarising the page', autoFixable: canAutoFix });
   } else if (page.metaDescription.length < 70) {
-    issues.push({ severity: 'warning', page: p, rule: 'Meta description too short', detail: `Meta is ${page.metaDescription.length} chars`, fix: 'Expand meta description to 150-160 characters', autoFixable: true });
+    issues.push({ severity: 'warning', page: p, rule: 'Meta description too short', detail: `Meta is ${page.metaDescription.length} chars`, fix: 'Expand meta description to 150-160 characters', autoFixable: canAutoFix });
   } else if (page.metaDescription.length > 160) {
-    issues.push({ severity: 'warning', page: p, rule: 'Meta description too long', detail: `Meta is ${page.metaDescription.length} chars — will be truncated`, fix: 'Shorten meta description to under 160 characters', autoFixable: true });
+    issues.push({ severity: 'warning', page: p, rule: 'Meta description too long', detail: `Meta is ${page.metaDescription.length} chars — will be truncated`, fix: 'Shorten meta description to under 160 characters', autoFixable: canAutoFix });
   }
 
   // H1 checks
   if (page.h1s.length === 0) {
-    issues.push({ severity: 'critical', page: p, rule: 'Missing H1', detail: 'No H1 tag found on page', fix: 'Add a single H1 tag that includes the primary keyword', autoFixable: true });
+    issues.push({ severity: 'critical', page: p, rule: 'Missing H1', detail: 'No H1 tag found on page', fix: 'Add a single H1 tag that includes the primary keyword', autoFixable: canAutoFix });
   } else if (page.h1s.length > 1) {
     issues.push({ severity: 'warning', page: p, rule: 'Multiple H1 tags', detail: `Found ${page.h1s.length} H1 tags: ${page.h1s.slice(0,2).join(' | ')}`, fix: 'Keep only one H1 per page', autoFixable: false });
   }
@@ -91,7 +97,7 @@ function auditPage(page: PageData, keyword?: string): AuditIssue[] {
 
   // Keyword in title
   if (keyword && page.title && !page.title.toLowerCase().includes(keyword.toLowerCase().split(' ')[0])) {
-    issues.push({ severity: 'recommendation', page: p, rule: 'Keyword not in title', detail: `Primary keyword "${keyword}" not found in title`, fix: `Include "${keyword}" or a close variant in the title tag`, autoFixable: true });
+    issues.push({ severity: 'recommendation', page: p, rule: 'Keyword not in title', detail: `Primary keyword "${keyword}" not found in title`, fix: `Include "${keyword}" or a close variant in the title tag`, autoFixable: canAutoFix });
   }
 
   // Keyword in H1
@@ -100,36 +106,34 @@ function auditPage(page: PageData, keyword?: string): AuditIssue[] {
     const keywordWords = keyword.toLowerCase().split(' ').filter(w => w.length > 3);
     const matches = keywordWords.filter(w => h1Text.includes(w)).length;
     if (matches < keywordWords.length / 2) {
-      issues.push({ severity: 'recommendation', page: p, rule: 'Keyword weak in H1', detail: `H1 "${page.h1s[0]}" doesn't strongly reflect the keyword`, fix: 'Rewrite H1 to include primary keyword naturally', autoFixable: true });
+      issues.push({ severity: 'recommendation', page: p, rule: 'Keyword weak in H1', detail: `H1 "${page.h1s[0]}" doesn't strongly reflect the keyword`, fix: 'Rewrite H1 to include primary keyword naturally', autoFixable: canAutoFix });
     }
   }
 
   // Keyword in meta
   if (keyword && page.metaDescription && !page.metaDescription.toLowerCase().includes(keyword.toLowerCase().split(' ')[0])) {
-    issues.push({ severity: 'recommendation', page: p, rule: 'Keyword not in meta description', detail: 'Primary keyword missing from meta description', fix: 'Include keyword naturally in meta description', autoFixable: true });
+    issues.push({ severity: 'recommendation', page: p, rule: 'Keyword not in meta description', detail: 'Primary keyword missing from meta description', fix: 'Include keyword naturally in meta description', autoFixable: canAutoFix });
   }
 
-  // Schema markup checks — use path segments only (strip domain from full URL)
-  const urlPath = p.replace(/^https?:\/\/[^/]+/, '');
-  const isBlogPost  = urlPath.startsWith('/blog/') && urlPath.length > '/blog/'.length;
+  // Schema markup checks
   const isDirectory = !isBlogPost && urlPath.split('/').filter(Boolean).length >= 2;
   if (!page.hasSchema) {
     if (isBlogPost) {
       issues.push({ severity: 'warning', page: p, rule: 'Missing schema markup', detail: 'No JSON-LD structured data found on blog post', fix: 'Add Article + BreadcrumbList JSON-LD schema', autoFixable: true });
     } else if (isDirectory) {
-      issues.push({ severity: 'warning', page: p, rule: 'Missing schema markup', detail: 'No JSON-LD structured data found on directory page', fix: 'Add FAQPage + BreadcrumbList JSON-LD schema', autoFixable: true });
+      issues.push({ severity: 'warning', page: p, rule: 'Missing schema markup', detail: 'No JSON-LD structured data found on directory page', fix: 'Add FAQPage + BreadcrumbList JSON-LD schema', autoFixable: false });
     }
   } else {
     const missing: string[] = [];
     if (isBlogPost && !page.schemaTypes.includes('Article') && !page.schemaTypes.includes('BlogPosting')) missing.push('Article');
-    if (!page.schemaTypes.includes('BreadcrumbList')) missing.push('BreadcrumbList');
+    if (isBlogPost && !page.schemaTypes.includes('BreadcrumbList')) missing.push('BreadcrumbList');
     if (missing.length > 0) {
       issues.push({ severity: 'recommendation', page: p, rule: 'Incomplete schema markup', detail: `Missing schema types: ${missing.join(', ')}`, fix: `Add ${missing.join(' and ')} JSON-LD to existing schema`, autoFixable: true });
     }
   }
 
   // Internal linking checks
-  if (p.includes('/blog/')) {
+  if (isBlogPost) {
     const directoryLinks = page.internalLinks.filter(l => {
       const parts = l.replace(/^https?:\/\/[^/]+/, '').split('/').filter(Boolean);
       return parts.length >= 2 && !l.includes('/blog');
