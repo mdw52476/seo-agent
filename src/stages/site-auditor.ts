@@ -109,18 +109,19 @@ function auditPage(page: PageData, keyword?: string): AuditIssue[] {
     issues.push({ severity: 'recommendation', page: p, rule: 'Keyword not in meta description', detail: 'Primary keyword missing from meta description', fix: 'Include keyword naturally in meta description', autoFixable: true });
   }
 
-  // Schema markup checks
+  // Schema markup checks — use path segments only (strip domain from full URL)
+  const urlPath = p.replace(/^https?:\/\/[^/]+/, '');
+  const isBlogPost  = urlPath.startsWith('/blog/') && urlPath.length > '/blog/'.length;
+  const isDirectory = !isBlogPost && urlPath.split('/').filter(Boolean).length >= 2;
   if (!page.hasSchema) {
-    const isBlog = p.includes('/blog/');
-    const isDirectory = !isBlog && p.split('/').length >= 4;
-    if (isBlog) {
+    if (isBlogPost) {
       issues.push({ severity: 'warning', page: p, rule: 'Missing schema markup', detail: 'No JSON-LD structured data found on blog post', fix: 'Add Article + BreadcrumbList JSON-LD schema', autoFixable: true });
     } else if (isDirectory) {
       issues.push({ severity: 'warning', page: p, rule: 'Missing schema markup', detail: 'No JSON-LD structured data found on directory page', fix: 'Add FAQPage + BreadcrumbList JSON-LD schema', autoFixable: true });
     }
   } else {
     const missing: string[] = [];
-    if (p.includes('/blog/') && !page.schemaTypes.includes('Article') && !page.schemaTypes.includes('BlogPosting')) missing.push('Article');
+    if (isBlogPost && !page.schemaTypes.includes('Article') && !page.schemaTypes.includes('BlogPosting')) missing.push('Article');
     if (!page.schemaTypes.includes('BreadcrumbList')) missing.push('BreadcrumbList');
     if (missing.length > 0) {
       issues.push({ severity: 'recommendation', page: p, rule: 'Incomplete schema markup', detail: `Missing schema types: ${missing.join(', ')}`, fix: `Add ${missing.join(' and ')} JSON-LD to existing schema`, autoFixable: true });
