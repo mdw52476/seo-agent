@@ -17,8 +17,9 @@ export async function logArticle(entry: {
   url: string;
   articleType: 'article' | 'directory';
 }) {
-  if (!supabase) return;
-  await supabase.from('articles').insert({
+  if (!supabase) { console.error('[Supabase] client is null — SUPABASE_URL/ANON_KEY missing'); return; }
+  if (!entry.siteId) { console.error('[Supabase] logArticle: siteId is empty — SITE_ID env var not set'); return; }
+  const { error } = await supabase.from('articles').insert({
     site_id:      entry.siteId,
     keyword:      entry.keyword,
     slug:         entry.slug,
@@ -26,6 +27,7 @@ export async function logArticle(entry: {
     url:          entry.url,
     article_type: entry.articleType,
   });
+  if (error) console.error('[Supabase] logArticle failed:', error.message);
 }
 
 export async function logSiteProfile(profile: Record<string, unknown>) {

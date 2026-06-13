@@ -296,8 +296,12 @@ export interface PublishResult {
 
 export async function publishArticle(article: Article, opts: { contentPath?: string; siteType?: 'nextjs' | 'html' } = {}): Promise<PublishResult> {
   if (!GITHUB_TOKEN) {
-    throw new Error('GITHUB_TOKEN is not set — add it to your .env file');
+    throw new Error('GITHUB_TOKEN is not set — add it in Site Settings');
   }
+  if (!GITHUB_REPO) {
+    throw new Error('GITHUB_REPO is not set — add it in Site Settings (e.g. owner/repo)');
+  }
+  logger.info('Publisher', `Target repo: ${GITHUB_REPO} branch: ${GITHUB_BRANCH}`);
 
   const contentPath = opts.contentPath ?? GITHUB_CONTENT_PATH;
 
