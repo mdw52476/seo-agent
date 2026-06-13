@@ -16,7 +16,7 @@ import { logger } from './lib/logger.js';
 import { isPublished, appendLog, printLog } from './lib/published-log.js';
 import { auditSite, printReport } from './stages/site-auditor.js';
 import { fixSite } from './stages/site-fixer.js';
-import { logArticle, logAuditReport } from './lib/supabase.js';
+import { logArticle, logAuditReport, logContentPlan } from './lib/supabase.js';
 
 const SITE_ID = process.env.SITE_ID ?? '';
 
@@ -171,6 +171,42 @@ async function main() {
       }
 
       console.log(`\n✓ Done — ${targets.length} director${targets.length > 1 ? 'ies' : 'y'} published.`);
+      break;
+    }
+    case 'day-guide': {
+      const url = args[0];
+      if (!url) { console.error('Usage: tsx src/index.ts day-guide <url> [--cycle N]'); process.exit(1); }
+
+      const cycleFlag = args.indexOf('--cycle');
+      const cycle = cycleFlag !== -1 ? parseInt(args[cycleFlag + 1] ?? '1', 10) : 1;
+
+      const site = await analyzeSite(url);
+      const keywords = await researchKeywords(site, { topN: 60 });
+      const fresh = keywords.filter((k) => !isPublished(k.keyword));
+
+      const selected = fresh.slice(0, 30);
+      if (selected.length < 10) {
+        logger.warn('Main', 'Not enough fresh keywords — clearing published log may help');
+      }
+
+      logger.info('Main', `Building 30-day guide from ${selected.length} keywords…`);
+      const serpInsights = await researchSerps(selected, site, { sampleSize: 5 });
+      const plans = await buildContentPlan(site, selected, { weeksAhead: 10, articlesPerWeek: 3, serpInsights });
+      const allArticles = plans.flatMap((p) => p.articles).slice(0, 30);
+
+      // Assign days: every 3rd day is a directory, rest are articles
+      const days = allArticles.map((article, i) => ({
+        day:         i + 1,
+        type:        (i + 1) % 3 === 0 ? 'directory' : 'article',
+        keyword:     article.keyword,
+        title:       article.title,
+        articleType: article.articleType,
+        outline:     article.outline,
+        status:      'planned',
+      }));
+
+      await logContentPlan({ siteId: SITE_ID, cycle, days });
+      logger.success('Main', `30-day content plan saved (cycle ${cycle})`);
       break;
     }
     case 'migrate-dirs': {

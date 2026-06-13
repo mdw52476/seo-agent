@@ -46,3 +46,16 @@ export async function logAuditReport(report: {
     issues:        report.issues,
   });
 }
+
+export async function logContentPlan(entry: {
+  siteId: string;
+  cycle: number;
+  days: unknown[];
+}) {
+  if (!supabase) return;
+  await supabase.from('content_plans').upsert({
+    site_id: entry.siteId,
+    cycle:   entry.cycle,
+    days:    entry.days,
+  }, { onConflict: 'site_id,cycle' });
+}
