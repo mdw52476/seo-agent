@@ -50,12 +50,16 @@ async function ghPut(path: string, content: string, message: string, sha: string
 }
 
 function urlToGithubPath(url: string, siteUrl: string): string | null {
-  const path = url.replace(siteUrl, '');
+  const path = url.replace(siteUrl, '').replace(/\/$/, '') || '/';
   if (path.startsWith('/blog/')) {
     const slug = path.replace('/blog/', '');
     return `content/posts/${slug}.mdx`;
   }
-  return null; // city/shop pages are in Supabase, not GitHub files
+  if (path === '/' || path === '') return 'src/app/page.tsx';
+  if (path === '/blog')            return 'src/app/blog/page.tsx';
+  // Generic directory pages: /foo/bar → src/app/foo/bar/page.tsx
+  if (!path.includes('.'))         return `src/app${path}/page.tsx`;
+  return null;
 }
 
 // ── Claude: generate specific fix for an issue ───────────────────────────────
@@ -127,9 +131,14 @@ async function prompt(question: string): Promise<string> {
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 
-export async function fixSite(report: AuditReport, opts: { yes?: boolean } = {}): Promise<void> {
-  const fixable = report.issues.filter(i => i.autoFixable);
-  const manual = report.issues.filter(i => !i.autoFixable);
+export async function fixSite(report: AuditReport, opts: { yes?: boolean; ruleFilter?: string; pageFilter?: string } = {}): Promise<void> {
+  const allIssues = report.issues.filter(i => {
+    if (opts.ruleFilter && i.rule !== opts.ruleFilter) return false;
+    if (opts.pageFilter && i.page !== opts.pageFilter) return false;
+    return true;
+  });
+  const fixable = allIssues.filter(i => i.autoFixable);
+  const manual  = allIssues.filter(i => !i.autoFixable);
 
   if (fixable.length === 0) {
     console.log('\nNo auto-fixable issues found. All issues require manual attention:');

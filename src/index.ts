@@ -248,7 +248,12 @@ async function main() {
         printReport(report);
       }
       const yes = args.includes('--yes') || args.includes('-y');
-      await fixSite(report, { yes });
+      // Support targeted single-issue fix: --rule "rule name" --page "url"
+      const ruleIdx  = args.indexOf('--rule');
+      const pageIdx  = args.indexOf('--page');
+      const ruleFilter = ruleIdx  !== -1 ? args[ruleIdx  + 1] : undefined;
+      const pageFilter = pageIdx  !== -1 ? args[pageIdx  + 1] : undefined;
+      await fixSite(report, { yes, ruleFilter, pageFilter });
       break;
     }
     default:
