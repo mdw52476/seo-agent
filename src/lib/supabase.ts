@@ -1,10 +1,13 @@
 import 'dotenv/config';
 import { createClient } from '@supabase/supabase-js';
+import ws from 'ws';
 
 const url = process.env.SUPABASE_URL ?? '';
 const key = process.env.SUPABASE_ANON_KEY ?? '';
 
-export const supabase = url && key ? createClient(url, key) : null;
+export const supabase = url && key
+  ? createClient(url, key, { realtime: { transport: ws } })
+  : null;
 
 export async function logArticle(entry: {
   siteId: string;
