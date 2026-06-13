@@ -111,6 +111,13 @@ Do not truncate or summarize. Return ONLY the fixed file, no explanation.`,
 
   if (fixedContent === originalContent) return null;
 
+  // Basic syntax guard: reject if template literals appear inside JSON-LD strings
+  // (Claude Haiku sometimes emits `${expr}` inside JSON object values which breaks TSX)
+  if (/`[^`]*\$\{/.test(fixedContent) && githubPath.endsWith('.tsx')) {
+    logger.warn('SiteFixer', `Skipping fix for ${githubPath} — generated code contains template literals in TSX context (unsafe)`);
+    return null;
+  }
+
   return {
     issue,
     githubPath,
