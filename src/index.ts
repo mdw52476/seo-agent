@@ -124,7 +124,7 @@ async function main() {
         const target = targets[i];
         logger.info('Main', `Writing article ${i + 1}/${targets.length}: "${target.title}"`);
         const article = await writeArticle(target, site);
-        const result = await publishArticle(article);
+        const result = await publishArticle(article, { siteUrl: site.url });
         const articleUrl = `${site.url}/blog/${article.slug}`;
         appendLog({ keyword: target.keyword, slug: article.slug, title: article.title, publishedAt: new Date().toISOString(), url: articleUrl });
         await logArticle({ siteId: SITE_ID, keyword: target.keyword, slug: article.slug, title: article.title, url: articleUrl, articleType: 'article' });
@@ -164,7 +164,7 @@ async function main() {
         const target = targets[i];
         logger.info('Main', `Writing directory ${i + 1}/${targets.length}: "${target.title}"`);
         const article = await writeArticle(target, site);
-        const result = await publishArticle(article, { contentPath: DIR_CONTENT_PATH });
+        const result = await publishArticle(article, { contentPath: DIR_CONTENT_PATH, siteUrl: site.url });
         appendLog({ keyword: target.keyword, slug: article.slug, title: article.title, publishedAt: new Date().toISOString(), url: result.url });
         appendLog({ keyword: target.keyword + ':dir', slug: article.slug, title: article.title, publishedAt: new Date().toISOString(), url: result.url });
         await logArticle({ siteId: SITE_ID, keyword: target.keyword, slug: article.slug, title: article.title, url: result.url, articleType: 'directory' });

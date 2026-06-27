@@ -12,8 +12,14 @@
  */
 
 
+import Anthropic from '@anthropic-ai/sdk';
+import { existsSync, readFileSync } from 'fs';
+import { join } from 'path';
+import { crawlPage } from '../lib/crawler.js';
 import { logger } from '../lib/logger.js';
 import type { Article } from '../lib/types.js';
+
+const anthropic = new Anthropic();
 
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN ?? '';
 const GITHUB_REPO = process.env.GITHUB_REPO ?? '';
@@ -122,11 +128,15 @@ function buildHtml(article: Article): string {
 `;
 }
 
-// ── Blog scaffold ─────────────────────────────────────────────────────────────
-// Commits the blog pages and lib/posts.ts if they don't exist yet.
+// ── Blog scaffold — Claude-generated to match site design ────────────────────
 
-const BLOG_FILES: Record<string, string> = {
-  'src/lib/posts.ts': `import fs from 'fs';
+function loadLayoutMd(): string {
+  const p = join(process.cwd(), 'site-layout.md');
+  return existsSync(p) ? readFileSync(p, 'utf-8') : '';
+}
+
+// posts.ts is always the same — it's a data utility, not a UI component
+const POSTS_TS = `import fs from 'fs';
 import path from 'path';
 import matter from 'gray-matter';
 
@@ -175,60 +185,97 @@ export function getPost(slug: string): Post | null {
     content,
   };
 }
-`,
+`;
 
-  'src/app/blog/page.tsx': `import Link from 'next/link';
+async function generateBlogPages(siteUrl: string): Promise<{ blogIndex: string; blogSlug: string }> {
+  logger.info('Publisher', 'Crawling site to generate matching blog page templates…');
+
+  const layout = loadLayoutMd();
+
+  // Crawl homepage to extract nav, color scheme, and component patterns
+  let crawlSummary = '';
+  try {
+    const crawl = await crawlPage(siteUrl);
+    crawlSummary = `
+URL: ${crawl.url}
+Title: ${crawl.title}
+Nav items: ${crawl.internalLinks.slice(0, 10).join(', ')}
+H1s: ${crawl.h1s.join(' | ')}
+H2s: ${crawl.h2s.slice(0, 6).join(' | ')}
+Schema types: ${crawl.schemaTypes.join(', ') || 'none'}
+Body snippet: ${crawl.bodyText.slice(0, 2000)}
+`.trim();
+  } catch {
+    logger.warn('Publisher', 'Could not crawl homepage — generating generic templates');
+  }
+
+  const prompt = `You are a Next.js 15 developer. Generate two TypeScript page components for a blog that matches an existing site's design.
+
+${layout ? `## Site Layout Profile\n${layout}\n` : ''}
+${crawlSummary ? `## Homepage Crawl Data\n${crawlSummary}\n` : ''}
+
+Generate TWO files. Return them as a JSON object with exactly these keys:
+- "blogIndex": the full content of src/app/blog/page.tsx
+- "blogSlug": the full content of src/app/blog/[slug]/page.tsx
+
+Requirements for both files:
+- Use Next.js 15 App Router conventions (async params, generateStaticParams, generateMetadata)
+- Import getAllPosts / getAllPostSlugs / getPost from '@/lib/posts'
+- Match the site's visual style: colors, font weights, spacing, nav structure observed in the crawl
+- Include a <nav> that matches the site's existing navigation items
+- Use Tailwind CSS classes consistent with the site's design language
+- blog/page.tsx: list all posts with title, date, description, "Read more" link
+- blog/[slug]/page.tsx: render post with <article dangerouslySetInnerHTML /> and BreadcrumbList JSON-LD schema
+- Do NOT import components that don't exist — only use built-in Next.js imports and @/lib/posts
+- Return ONLY valid JSON, no markdown fences, no explanation`;
+
+  const msg = await anthropic.messages.create({
+    model: 'claude-sonnet-4-6',
+    max_tokens: 4096,
+    messages: [{ role: 'user', content: prompt }],
+  });
+
+  const raw = msg.content[0].type === 'text' ? msg.content[0].text : '';
+  const cleaned = raw.replace(/```json\n?|```/g, '').trim();
+
+  try {
+    const parsed = JSON.parse(cleaned) as { blogIndex: string; blogSlug: string };
+    if (!parsed.blogIndex || !parsed.blogSlug) throw new Error('Missing keys');
+    logger.success('Publisher', 'Blog page templates generated');
+    return parsed;
+  } catch {
+    logger.warn('Publisher', 'Could not parse Claude response — falling back to generic templates');
+    return {
+      blogIndex: `import Link from 'next/link';
 import { getAllPosts } from '@/lib/posts';
 
-export const metadata = {
-  title: 'Blog',
-  description: 'Articles, guides, and directories.',
-};
+export const metadata = { title: 'Blog', description: 'Articles and guides.' };
 
 export default function BlogPage() {
   const posts = getAllPosts();
-
   return (
     <main className="max-w-3xl mx-auto px-4 py-12">
-      <h1 className="text-3xl font-bold mb-2">Blog</h1>
-      <p className="text-gray-500 mb-10">
-        Articles, guides, and resources.
-      </p>
-      {posts.length === 0 ? (
-        <p className="text-gray-400">No posts yet — check back soon.</p>
-      ) : (
-        <ul className="space-y-8">
-          {posts.map((post) => (
-            <li key={post.slug} className="border-b pb-8">
-              <Link href={\`/blog/\${post.slug}\`} className="group">
-                <h2 className="text-xl font-semibold group-hover:text-blue-600 transition-colors">
-                  {post.title}
-                </h2>
-              </Link>
-              <p className="text-sm text-gray-400 mt-1">{post.date}</p>
-              <p className="text-gray-600 mt-2">{post.description}</p>
-              <Link
-                href={\`/blog/\${post.slug}\`}
-                className="text-blue-500 text-sm mt-3 inline-block hover:underline"
-              >
-                Read more →
-              </Link>
-            </li>
-          ))}
-        </ul>
-      )}
+      <h1 className="text-3xl font-bold mb-8">Blog</h1>
+      <ul className="space-y-8">
+        {posts.map((post) => (
+          <li key={post.slug} className="border-b pb-8">
+            <Link href={\`/blog/\${post.slug}\`}>
+              <h2 className="text-xl font-semibold hover:text-blue-600">{post.title}</h2>
+            </Link>
+            <p className="text-sm text-gray-400 mt-1">{post.date}</p>
+            <p className="text-gray-600 mt-2">{post.description}</p>
+            <Link href={\`/blog/\${post.slug}\`} className="text-blue-500 text-sm mt-3 inline-block hover:underline">Read more →</Link>
+          </li>
+        ))}
+      </ul>
     </main>
   );
-}
-`,
-
-  'src/app/blog/[slug]/page.tsx': `import { notFound } from 'next/navigation';
+}`,
+      blogSlug: `import { notFound } from 'next/navigation';
 import { getAllPostSlugs, getPost } from '@/lib/posts';
 import type { Metadata } from 'next';
 
-interface Props {
-  params: Promise<{ slug: string }>;
-}
+interface Props { params: Promise<{ slug: string }> }
 
 export async function generateStaticParams() {
   return getAllPostSlugs().map((slug) => ({ slug }));
@@ -238,52 +285,67 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { slug } = await params;
   const post = getPost(slug);
   if (!post) return {};
-  return {
-    title: post.title,
-    description: post.description,
-  };
+  return { title: post.title, description: post.description };
 }
 
 export default async function BlogPostPage({ params }: Props) {
   const { slug } = await params;
   const post = getPost(slug);
   if (!post) notFound();
-
   return (
     <main className="max-w-3xl mx-auto px-4 py-12">
       <h1 className="text-3xl font-bold mb-2">{post.title}</h1>
       <p className="text-sm text-gray-400 mb-8">{post.date}</p>
-      <article
-        className="prose prose-gray max-w-none"
-        dangerouslySetInnerHTML={{ __html: post.content }}
-      />
+      <article className="prose prose-gray max-w-none" dangerouslySetInnerHTML={{ __html: post.content }} />
     </main>
   );
+}`,
+    };
+  }
 }
-`,
 
-  'content/posts/.gitkeep': '',
-};
-
-async function ensureBlogScaffold(): Promise<void> {
+async function ensureBlogScaffold(siteUrl: string): Promise<void> {
   logger.info('Publisher', 'Checking blog scaffold…');
 
-  for (const [filePath, content] of Object.entries(BLOG_FILES)) {
-    const sha = await getFileSha(filePath);
-    if (sha) {
-      logger.info('Publisher', `  ${filePath} — already exists, skipping`);
-      continue;
-    }
-    logger.info('Publisher', `  Creating ${filePath}…`);
-    await commitFile(
-      filePath,
-      content,
-      `chore: add blog scaffold — ${filePath}`
-    );
+  const needsGeneration =
+    !(await getFileSha('src/app/blog/page.tsx')) ||
+    !(await getFileSha('src/app/blog/[slug]/page.tsx'));
+
+  // posts.ts — always commit if missing (no design dependency)
+  const postsTsSha = await getFileSha('src/lib/posts.ts');
+  if (!postsTsSha) {
+    logger.info('Publisher', '  Creating src/lib/posts.ts…');
+    await commitFile('src/lib/posts.ts', POSTS_TS, 'chore: add blog posts helper');
+  } else {
+    logger.info('Publisher', '  src/lib/posts.ts — already exists, skipping');
   }
 
-  // Add gray-matter dependency note (user must run npm install)
-  logger.success('Publisher', 'Blog scaffold committed');
+  // content/posts/.gitkeep
+  const gitkeepSha = await getFileSha('content/posts/.gitkeep');
+  if (!gitkeepSha) {
+    await commitFile('content/posts/.gitkeep', '', 'chore: create content/posts directory');
+  }
+
+  // Blog pages — generate with Claude if either is missing
+  if (needsGeneration) {
+    const { blogIndex, blogSlug } = await generateBlogPages(siteUrl);
+
+    const indexSha = await getFileSha('src/app/blog/page.tsx');
+    if (!indexSha) {
+      logger.info('Publisher', '  Creating src/app/blog/page.tsx…');
+      await commitFile('src/app/blog/page.tsx', blogIndex, 'chore: add blog index page (design-matched)');
+    }
+
+    const slugSha = await getFileSha('src/app/blog/[slug]/page.tsx');
+    if (!slugSha) {
+      logger.info('Publisher', '  Creating src/app/blog/[slug]/page.tsx…');
+      await commitFile('src/app/blog/[slug]/page.tsx', blogSlug, 'chore: add blog post page (design-matched)');
+    }
+  } else {
+    logger.info('Publisher', '  Blog pages already exist — skipping generation');
+  }
+
+  logger.success('Publisher', 'Blog scaffold ready');
 }
 
 // ── Main publish function ─────────────────────────────────────────────────────
@@ -294,7 +356,7 @@ export interface PublishResult {
   isNew: boolean;
 }
 
-export async function publishArticle(article: Article, opts: { contentPath?: string; siteType?: 'nextjs' | 'html' } = {}): Promise<PublishResult> {
+export async function publishArticle(article: Article, opts: { contentPath?: string; siteType?: 'nextjs' | 'html'; siteUrl?: string } = {}): Promise<PublishResult> {
   if (!GITHUB_TOKEN) {
     throw new Error('GITHUB_TOKEN is not set — add it in Site Settings');
   }
@@ -307,7 +369,7 @@ export async function publishArticle(article: Article, opts: { contentPath?: str
 
   // Only scaffold blog for the standard posts path
   if (contentPath === GITHUB_CONTENT_PATH) {
-    await ensureBlogScaffold();
+    await ensureBlogScaffold(opts.siteUrl ?? process.env.SITE_URL ?? '');
   }
 
   const isHtml = (opts.siteType ?? SITE_TYPE) === 'html';
