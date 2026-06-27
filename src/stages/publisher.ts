@@ -123,9 +123,114 @@ function buildHtml(article: Article): string {
     <p class="post-date">${date}</p>
     ${article.content}
   </article>
+  <p><a href="/blog/">← Back to blog</a></p>
 </body>
 </html>
 `;
+}
+
+// ── HTML blog index — scaffold + per-publish update ───────────────────────────
+
+async function generateHtmlBlogIndex(siteUrl: string): Promise<string> {
+  logger.info('Publisher', 'Generating HTML blog index page…');
+  const layout = loadLayoutMd();
+
+  let crawlSummary = '';
+  try {
+    const crawl = await crawlPage(siteUrl);
+    crawlSummary = `URL: ${crawl.url}\nTitle: ${crawl.title}\nNav links: ${crawl.internalLinks.slice(0, 10).join(', ')}\nBody snippet: ${crawl.bodyText.slice(0, 1500)}`;
+  } catch {
+    logger.warn('Publisher', 'Could not crawl site for HTML index generation');
+  }
+
+  const prompt = `Generate a blog index HTML page for an HTML website.
+
+${layout ? `## Site Layout Profile\n${layout}\n` : ''}
+${crawlSummary ? `## Site Crawl Data\n${crawlSummary}\n` : ''}
+
+Requirements:
+- Match the site's visual style, nav structure, and color scheme from the crawl data above
+- Include a nav bar that mirrors the site's existing navigation
+- Include a section header "Blog" or "Articles"
+- Include EXACTLY this HTML comment on its own line where the article list will go: <!-- ARTICLES_START -->
+- Below the comment, include an empty <ul id="article-list" class="article-list"></ul>
+- Include a footer that mirrors the site's existing footer if visible in crawl
+- Inline CSS in a <style> tag that matches the site's design language
+- Return ONLY the complete HTML document, no explanation`;
+
+  const msg = await anthropic.messages.create({
+    model: 'claude-sonnet-4-6',
+    max_tokens: 2048,
+    messages: [{ role: 'user', content: prompt }],
+  });
+
+  const raw = msg.content[0].type === 'text' ? msg.content[0].text : '';
+  const cleaned = raw.replace(/```html\n?|```/g, '').trim();
+
+  if (cleaned.includes('<!-- ARTICLES_START -->')) return cleaned;
+
+  // Fallback if Claude didn't include the marker
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Blog</title>
+  <style>body{font-family:sans-serif;max-width:760px;margin:0 auto;padding:2rem}ul{list-style:none;padding:0}.article-list li{border-bottom:1px solid #eee;padding:1.5rem 0}h2{margin:0 0 .25rem}p{color:#555;margin:.25rem 0}.date{font-size:.85rem;color:#999}a{color:inherit;text-decoration:none}a:hover{text-decoration:underline}</style>
+</head>
+<body>
+  <nav><a href="/">← Home</a></nav>
+  <h1>Blog</h1>
+  <!-- ARTICLES_START -->
+  <ul id="article-list" class="article-list"></ul>
+</body>
+</html>`;
+}
+
+async function updateHtmlBlogIndex(article: Article, siteUrl: string): Promise<void> {
+  const indexPath = 'blog/index.html';
+  const date = new Date().toISOString().slice(0, 10);
+  const slug = article.slug;
+
+  const newEntry = `  <li>
+    <p class="date">${date}</p>
+    <h2><a href="/blog/${slug}.html">${article.title.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</a></h2>
+    <p>${article.metaDescription.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</p>
+  </li>`;
+
+  const existingSha = await getFileSha(indexPath);
+
+  if (!existingSha) {
+    // First article — scaffold the index
+    logger.info('Publisher', 'Creating blog/index.html…');
+    const scaffold = await generateHtmlBlogIndex(siteUrl);
+    const withEntry = scaffold.replace(
+      '<!-- ARTICLES_START -->',
+      `<!-- ARTICLES_START -->\n${newEntry}`
+    );
+    await commitFile(indexPath, withEntry, `chore: create blog index page`);
+    return;
+  }
+
+  // Fetch and update existing index
+  logger.info('Publisher', 'Updating blog/index.html…');
+  const res = await ghFetch(`/repos/${GITHUB_REPO}/contents/${indexPath}?ref=${GITHUB_BRANCH}`);
+  if (!res.ok) throw new Error(`Could not fetch ${indexPath}: ${res.status}`);
+  const data = await res.json() as { content: string; sha: string };
+  const current = Buffer.from(data.content.replace(/\n/g, ''), 'base64').toString('utf-8');
+
+  if (!current.includes('<!-- ARTICLES_START -->')) {
+    logger.warn('Publisher', 'blog/index.html missing <!-- ARTICLES_START --> marker — skipping update');
+    return;
+  }
+
+  const updated = current.replace(
+    '<!-- ARTICLES_START -->',
+    `<!-- ARTICLES_START -->\n${newEntry}`
+  );
+
+  await commitFile(indexPath, updated, `content: add "${article.title}" to blog index`, data.sha);
+  logger.success('Publisher', 'blog/index.html updated');
 }
 
 // ── Blog scaffold — Claude-generated to match site design ────────────────────
@@ -367,17 +472,21 @@ export async function publishArticle(article: Article, opts: { contentPath?: str
   logger.info('Publisher', `Target repo: ${GITHUB_REPO} branch: ${GITHUB_BRANCH}`);
 
   const contentPath = opts.contentPath ?? GITHUB_CONTENT_PATH;
+  const siteUrl = opts.siteUrl ?? process.env.SITE_URL ?? '';
+  const isHtmlSite = (opts.siteType ?? SITE_TYPE) === 'html';
 
-  // Only scaffold blog for the standard posts path
-  if (contentPath === GITHUB_CONTENT_PATH) {
-    await ensureBlogScaffold(opts.siteUrl ?? process.env.SITE_URL ?? '');
+  if (isHtmlSite) {
+    // HTML sites: update the blog index on every publish
+    await updateHtmlBlogIndex(article, siteUrl);
+  } else if (contentPath === GITHUB_CONTENT_PATH) {
+    // Next.js sites: scaffold blog pages on first publish only
+    await ensureBlogScaffold(siteUrl);
   }
 
-  const isHtml = (opts.siteType ?? SITE_TYPE) === 'html';
-  const ext = isHtml ? 'html' : 'mdx';
+  const ext = isHtmlSite ? 'html' : 'mdx';
   const fileName = `${article.slug}.${ext}`;
   const filePath = `${contentPath}/${fileName}`;
-  const fileContent = isHtml ? buildHtml(article) : buildMdx(article);
+  const fileContent = isHtmlSite ? buildHtml(article) : buildMdx(article);
 
   logger.info('Publisher', `Publishing "${article.title}" → ${filePath}`);
 
