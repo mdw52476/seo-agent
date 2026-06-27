@@ -224,9 +224,10 @@ Requirements for both files:
 - Match the site's visual style: colors, font weights, spacing, nav structure observed in the crawl
 - Include a <nav> that matches the site's existing navigation items
 - Use Tailwind CSS classes consistent with the site's design language
-- blog/page.tsx: list all posts with title, date, description, "Read more" link
-- blog/[slug]/page.tsx: render post with <article dangerouslySetInnerHTML /> and BreadcrumbList JSON-LD schema
+- blog/page.tsx: MUST call getAllPosts() at the top of the default export and map over the result — this is how new articles appear automatically when MDX files are added. Never hardcode post data.
+- blog/[slug]/page.tsx: MUST use generateStaticParams() + getPost(slug) + render with <article dangerouslySetInnerHTML={{ __html: post.content }} />. Include BreadcrumbList JSON-LD schema.
 - Do NOT import components that don't exist — only use built-in Next.js imports and @/lib/posts
+- Do NOT fetch posts from an API or database — always use getAllPosts() / getPost() from @/lib/posts
 - Return ONLY valid JSON, no markdown fences, no explanation`;
 
   const msg = await anthropic.messages.create({
