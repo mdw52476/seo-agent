@@ -18,11 +18,57 @@ import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { join } from 'path';
 
 const PROFILE_PATH = join(process.cwd(), 'site-profile.json');
+const LAYOUT_PATH = join(process.cwd(), 'site-layout.md');
 const PROFILE_MAX_AGE_DAYS = 30;
 
 const client = new Anthropic();
 
-const ANALYSIS_PROMPT = (crawlJson: string) => `
+const LAYOUT_PROMPT = (pages: string) => `
+You are an expert SEO analyst examining a website's content structure and design patterns.
+Analyze the crawl data below and produce a markdown document that the content writing agent
+will read before generating ANY new article or page for this site.
+
+Crawl data from multiple pages:
+${pages}
+
+Write a markdown document called "Site Layout & Structure Profile" with these sections:
+
+## Title Pattern
+Show the exact pattern used, e.g. "{Topic} in {City}, OH | BrandName" — include separator style (|, —, :), brand placement, max char count observed.
+
+## Meta Description Pattern
+Show the pattern, e.g. "Find {service} in {city}, OH. {benefit}. {cta}." — include typical length.
+
+## URL / Slug Format
+How are slugs formatted? e.g. "kebab-case, no year suffix, city pages at /ohio/[city]"
+
+## Content Structure
+- Typical H2 count per page
+- Typical word count range
+- Intro style (does it start with an H2 or jump straight to paragraphs?)
+- CTA placement (bottom only, mid-page, etc.)
+- Any recurring content blocks (pricing tables, FAQ sections, comparison grids, etc.)
+
+## Schema Markup
+List all JSON-LD schema types observed across pages.
+
+## Navigation
+List the main nav items observed.
+
+## Internal Linking Patterns
+Describe how pages link to each other (e.g. "city pages link to nearby city pills", "blog posts link to city directory").
+
+## Writing Tone
+Based on the body text observed, describe the tone: formal/conversational, sentence length, use of second person, etc.
+
+## What to Replicate
+A short bulleted checklist of the most important patterns new content must follow to match this site.
+
+Be specific and concrete. Use actual examples from the crawl data where possible.
+Avoid generic advice — everything should be grounded in what you actually observed.
+`;
+
+ = (crawlJson: string) => `
 You are an expert SEO analyst. Analyze the following website crawl data and return a structured JSON object.
 
 Crawl data:
@@ -132,7 +178,51 @@ export async function analyzeSite(url: string, opts: { forceRefresh?: boolean } 
   await logSiteProfile(result);
 
   logger.success('SiteAnalyzer', `Analysis complete for: ${result.niche}`);
+
+  // Always regenerate layout fingerprint on fresh analysis
+  await fingerprintLayout(url);
+
   return result;
+}
+
+export async function fingerprintLayout(url: string): Promise<void> {
+  logger.info('SiteAnalyzer', `Fingerprinting layout for: ${url}`);
+
+  // Crawl homepage + blog index + a content page (best-effort)
+  const pagesToCrawl = [
+    url,
+    new URL('/blog', url).href,
+    new URL('/ohio', url).href,
+  ];
+
+  const crawls = await Promise.allSettled(pagesToCrawl.map((p) => crawlPage(p)));
+
+  const pageSummaries = crawls
+    .filter((r) => r.status === 'fulfilled')
+    .map((r) => (r as PromiseFulfilledResult<Awaited<ReturnType<typeof crawlPage>>>).value)
+    .map((c) => `
+=== PAGE: ${c.url} ===
+Title: ${c.title}
+Meta: ${c.metaDescription}
+H1s: ${c.h1s.join(' | ')}
+H2s (${c.h2s.length}): ${c.h2s.slice(0, 8).join(' | ')}
+Schema types: ${c.schemaTypes.join(', ') || 'none'}
+Internal links sample: ${c.internalLinks.slice(0, 8).join(', ')}
+Body snippet: ${c.bodyText.slice(0, 1200)}
+`)
+    .join('\n');
+
+  logger.info('SiteAnalyzer', 'Generating site-layout.md…');
+
+  const message = await client.messages.create({
+    model: 'claude-sonnet-4-6',
+    max_tokens: 2048,
+    messages: [{ role: 'user', content: LAYOUT_PROMPT(pageSummaries) }],
+  });
+
+  const layoutMd = message.content[0].type === 'text' ? message.content[0].text : '';
+  writeFileSync(LAYOUT_PATH, layoutMd);
+  logger.success('SiteAnalyzer', `site-layout.md written (${layoutMd.split('\n').length} lines)`);
 }
 
 // ── CLI entrypoint ──────────────────────────────────────────────────────────

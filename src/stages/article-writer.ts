@@ -8,11 +8,25 @@
 
 
 import Anthropic from '@anthropic-ai/sdk';
+import { existsSync, readFileSync } from 'fs';
+import { join } from 'path';
 import { logger } from '../lib/logger.js';
 import { analyzeSite } from './site-analyzer.js';
 import { researchKeywords } from './keyword-researcher.js';
 import { buildContentPlan } from './content-planner.js';
 import type { SiteAnalysis, PlannedArticle, Article } from '../lib/types.js';
+
+function loadContextFiles(): { layout: string; voice: string; skill: string } {
+  const read = (name: string) => {
+    const p = join(process.cwd(), name);
+    return existsSync(p) ? readFileSync(p, 'utf-8') : '';
+  };
+  const layout = read('site-layout.md');
+  const voice = read('voice-guide.md');
+  const skill = read('SKILL.md');
+  if (!layout) logger.warn('ArticleWriter', 'site-layout.md not found — run "fingerprint <url>" first');
+  return { layout, voice, skill };
+}
 
 const client = new Anthropic();
 
@@ -50,6 +64,18 @@ async function writeDraft(
 ): Promise<string> {
   logger.info('ArticleWriter', `Writing draft: "${article.title}"…`);
 
+  const { layout, voice, skill } = loadContextFiles();
+
+  const contextBlock = [
+    layout && `## Site Layout & Structure\n${layout}`,
+    voice && `## Voice & Writing Style\n${voice}`,
+    skill && `## AI-Tell Rules to Avoid\n${skill}`,
+  ].filter(Boolean).join('\n\n---\n\n');
+
+  const systemPrompt = contextBlock
+    ? `${DRAFT_SYSTEM}\n\n---\n\n${contextBlock}`
+    : DRAFT_SYSTEM;
+
   const sections = article.outline
     .map((s, i) => `Section ${i + 1}: ${s}`)
     .join('\n');
@@ -59,7 +85,7 @@ async function writeDraft(
   const stream = await client.messages.stream({
     model: 'claude-sonnet-4-6',
     max_tokens: 8192,
-    system: DRAFT_SYSTEM,
+    system: systemPrompt,
     messages: [
       {
         role: 'user',
@@ -127,10 +153,21 @@ async function reflectAndRevise(
 ): Promise<string> {
   logger.info('ArticleWriter', 'Running reflection pass…');
 
+  const { layout, voice, skill } = loadContextFiles();
+  const contextBlock = [
+    layout && `## Site Layout & Structure\n${layout}`,
+    voice && `## Voice & Writing Style\n${voice}`,
+    skill && `## AI-Tell Rules to Avoid\n${skill}`,
+  ].filter(Boolean).join('\n\n---\n\n');
+
+  const reflectionSystem = contextBlock
+    ? `${REFLECTION_SYSTEM}\n\n---\n\n${contextBlock}`
+    : REFLECTION_SYSTEM;
+
   const msg = await client.messages.create({
     model: 'claude-sonnet-4-6',
     max_tokens: 8192,
-    system: REFLECTION_SYSTEM,
+    system: reflectionSystem,
     messages: [
       {
         role: 'user',

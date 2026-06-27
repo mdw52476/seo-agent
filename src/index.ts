@@ -8,7 +8,7 @@
 import dotenv from 'dotenv';
 import { join } from 'path';
 dotenv.config({ path: join(process.cwd(), '.env'), override: true });
-import { analyzeSite } from './stages/site-analyzer.js';
+import { analyzeSite, fingerprintLayout } from './stages/site-analyzer.js';
 import { researchKeywords } from './stages/keyword-researcher.js';
 import { buildContentPlan, printCalendar } from './stages/content-planner.js';
 import { researchSerps } from './stages/serp-researcher.js';
@@ -209,6 +209,13 @@ async function main() {
 
       await logContentPlan({ siteId: SITE_ID, cycle, days });
       logger.success('Main', `30-day content plan saved (cycle ${cycle})`);
+      break;
+    }
+    case 'fingerprint': {
+      const url = args[0];
+      if (!url) { console.error('Usage: tsx src/index.ts fingerprint <url>'); process.exit(1); }
+      await fingerprintLayout(url);
+      console.log('\n✓ site-layout.md updated.');
       break;
     }
     case 'migrate-dirs': {
