@@ -80,16 +80,29 @@ async function writeDraft(
     .map((s, i) => `Section ${i + 1}: ${s}`)
     .join('\n');
 
-  let draft = '';
+  const userContent = article.brief
+    ? `Write a comprehensive 3,000-4,000 word SEO article based on the following brief:
 
-  const stream = await client.messages.stream({
-    model: 'claude-sonnet-4-6',
-    max_tokens: 8192,
-    system: systemPrompt,
-    messages: [
-      {
-        role: 'user',
-        content: `Write a comprehensive 3,000-4,000 word SEO article with the following spec:
+ARTICLE BRIEF:
+${article.brief}
+
+Site niche: ${site.niche}
+Site URL: ${site.url}
+Site description: ${site.description}
+Target audience: ${site.targetAudience}
+
+Requirements:
+- Generate an SEO-optimized title and use it as the implied H1 (do not output the H1 tag — start with the intro paragraph)
+- Open with a strong 2-3 paragraph intro (no H2, straight into value)
+- Create 5-7 H2 sections that best serve the brief's topic
+- Each H2 section should be 300-500 words with at least one H3 sub-section
+- Include a comparison table where relevant (pricing, options, features)
+- End with a clear CTA relevant to the site's niche and linking back to ${site.url}
+- Include 2-4 internal links to relevant pages on ${site.url} where appropriate
+- The article must read as genuinely helpful to: ${site.targetAudience}
+
+Write the full article now in clean HTML.`
+    : `Write a comprehensive 3,000-4,000 word SEO article with the following spec:
 
 Title: ${article.title}
 Target keyword: "${article.keyword}"
@@ -111,9 +124,15 @@ Requirements:
 - Include 2-4 internal links to relevant pages on ${site.url} where appropriate
 - The article must read as genuinely helpful to someone in the target audience: ${site.targetAudience}
 
-Write the full article now in clean HTML.`,
-      },
-    ],
+Write the full article now in clean HTML.`;
+
+  let draft = '';
+
+  const stream = await client.messages.stream({
+    model: 'claude-sonnet-4-6',
+    max_tokens: 8192,
+    system: systemPrompt,
+    messages: [{ role: 'user', content: userContent }],
   });
 
   for await (const chunk of stream) {
@@ -230,6 +249,14 @@ Return ONLY the meta description text, no quotes, no explanation.`,
 
 // ── Main ─────────────────────────────────────────────────────────────────────
 
+function extractTitleFromHtml(html: string, fallback: string): string {
+  const h1 = html.match(/<h1[^>]*>(.*?)<\/h1>/i);
+  if (h1) return h1[1].replace(/<[^>]+>/g, '').trim();
+  const h2 = html.match(/<h2[^>]*>(.*?)<\/h2>/i);
+  if (h2) return h2[1].replace(/<[^>]+>/g, '').trim();
+  return fallback;
+}
+
 export async function writeArticle(
   article: PlannedArticle,
   site: SiteAnalysis
@@ -238,12 +265,17 @@ export async function writeArticle(
   const revised = await reflectAndRevise(draft, article, site);
   const metaDescription = await generateMeta(article, revised);
 
+  // When a brief was used, derive title from generated content
+  const title = article.brief
+    ? extractTitleFromHtml(revised, article.brief.slice(0, 80))
+    : article.title;
+
   return {
-    title: article.title,
-    slug: toSlug(article.title),
+    title,
+    slug: toSlug(title),
     content: revised,
     metaDescription,
-    keyword: article.keyword,
+    keyword: article.keyword || title,
     wordCount: countWords(revised),
   };
 }

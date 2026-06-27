@@ -98,16 +98,38 @@ async function main() {
     }
     case 'publish': {
       const url = args[0];
-      if (!url) { console.error('Usage: tsx src/index.ts publish <url> [--count N]'); process.exit(1); }
+      if (!url) { console.error('Usage: tsx src/index.ts publish <url> [--count N] [--brief "topic and instructions"]'); process.exit(1); }
 
       const countFlag = args.indexOf('--count');
       const count = countFlag !== -1 ? parseInt(args[countFlag + 1] ?? '1', 10) : 1;
 
-      const site = await analyzeSite(url);
-      // Fetch more keywords than needed so we have room to skip already-published ones
-      const keywords = await researchKeywords(site, { topN: Math.max(50, count * 10) });
+      const briefFlag = args.indexOf('--brief');
+      const brief = briefFlag !== -1 ? args[briefFlag + 1] : undefined;
 
-      // Filter out already-published keywords
+      const site = await analyzeSite(url);
+
+      if (brief) {
+        // User-specified brief — skip keyword research and planning entirely
+        logger.info('Main', `Writing to brief: "${brief.slice(0, 80)}…"`);
+        const target = {
+          keyword: brief.slice(0, 60),
+          title: '',
+          articleType: 'how-to' as const,
+          outline: [],
+          status: 'planned' as const,
+          brief,
+        };
+        const article = await writeArticle(target, site);
+        const result = await publishArticle(article, { siteUrl: site.url });
+        const articleUrl = `${site.url}/blog/${article.slug}`;
+        appendLog({ keyword: brief.slice(0, 60), slug: article.slug, title: article.title, publishedAt: new Date().toISOString(), url: articleUrl });
+        await logArticle({ siteId: SITE_ID, keyword: brief.slice(0, 60), slug: article.slug, title: article.title, url: articleUrl, articleType: 'article' });
+        console.log(`\n✓ Published: ${articleUrl}`);
+        break;
+      }
+
+      // Normal flow — keyword research + content planning
+      const keywords = await researchKeywords(site, { topN: Math.max(50, count * 10) });
       const fresh = keywords.filter((k) => !isPublished(k.keyword));
       logger.info('Main', `${fresh.length} unpublished keywords available (${keywords.length - fresh.length} already done)`);
 

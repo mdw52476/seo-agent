@@ -44,6 +44,7 @@ export interface PlannedArticle {
   outline: string[];
   status: 'planned' | 'writing' | 'written' | 'published';
   publishedUrl?: string;
+  brief?: string; // user-supplied topic/instructions — overrides outline when set
 }
 
 export interface Article {
