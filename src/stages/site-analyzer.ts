@@ -68,7 +68,7 @@ Be specific and concrete. Use actual examples from the crawl data where possible
 Avoid generic advice — everything should be grounded in what you actually observed.
 `;
 
- = (crawlJson: string) => `
+const ANALYSIS_PROMPT = (crawlJson: string) => `
 You are an expert SEO analyst. Analyze the following website crawl data and return a structured JSON object.
 
 Crawl data:
