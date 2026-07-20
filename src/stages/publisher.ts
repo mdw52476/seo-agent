@@ -31,17 +31,43 @@ const GH_API = 'https://api.github.com';
 
 // ── GitHub API helpers ────────────────────────────────────────────────────────
 
-async function ghFetch(path: string, options: RequestInit = {}): Promise<Response> {
-  return fetch(`${GH_API}${path}`, {
-    ...options,
-    headers: {
-      Authorization: `Bearer ${GITHUB_TOKEN}`,
-      Accept: 'application/vnd.github+json',
-      'X-GitHub-Api-Version': '2022-11-28',
-      'Content-Type': 'application/json',
-      ...(options.headers ?? {}),
-    },
-  });
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Retries transient failures (network errors, 5xx) with exponential backoff —
+// a bare 503 from GitHub's Content API shouldn't kill a whole publish run.
+async function ghFetch(path: string, options: RequestInit = {}, retries = 3): Promise<Response> {
+  for (let attempt = 0; ; attempt++) {
+    let res: Response;
+    try {
+      res = await fetch(`${GH_API}${path}`, {
+        ...options,
+        headers: {
+          Authorization: `Bearer ${GITHUB_TOKEN}`,
+          Accept: 'application/vnd.github+json',
+          'X-GitHub-Api-Version': '2022-11-28',
+          'Content-Type': 'application/json',
+          ...(options.headers ?? {}),
+        },
+      });
+    } catch (err) {
+      if (attempt >= retries) throw err;
+      const delay = 1000 * 2 ** attempt;
+      logger.warn('Publisher', `GitHub request failed (${err instanceof Error ? err.message : String(err)}) — retrying in ${delay}ms (${attempt + 1}/${retries})`);
+      await sleep(delay);
+      continue;
+    }
+
+    if (res.status >= 500 && attempt < retries) {
+      const delay = 1000 * 2 ** attempt;
+      logger.warn('Publisher', `GitHub returned ${res.status} — retrying in ${delay}ms (${attempt + 1}/${retries})`);
+      await sleep(delay);
+      continue;
+    }
+
+    return res;
+  }
 }
 
 async function getFileSha(path: string): Promise<string | null> {
