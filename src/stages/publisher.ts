@@ -246,6 +246,7 @@ import path from 'path';
 import matter from 'gray-matter';
 
 const POSTS_DIR = path.join(process.cwd(), 'content/posts');
+const DIRECTORIES_DIR = path.join(process.cwd(), 'content/directories');
 
 export interface PostMeta {
   slug: string;
@@ -260,23 +261,16 @@ export interface Post extends PostMeta {
   content: string;
 }
 
-export function getAllPostSlugs(): string[] {
-  if (!fs.existsSync(POSTS_DIR)) return [];
+function getSlugsIn(dir: string): string[] {
+  if (!fs.existsSync(dir)) return [];
   return fs
-    .readdirSync(POSTS_DIR)
+    .readdirSync(dir)
     .filter((f) => f.endsWith('.mdx'))
     .map((f) => f.replace(/\\.mdx$/, ''));
 }
 
-export function getAllPosts(): PostMeta[] {
-  return getAllPostSlugs()
-    .map((slug) => getPost(slug))
-    .filter((p): p is Post => p !== null)
-    .sort((a, b) => (a.date < b.date ? 1 : -1));
-}
-
-export function getPost(slug: string): Post | null {
-  const filePath = path.join(POSTS_DIR, \`\${slug}.mdx\`);
+function getEntryIn(dir: string, slug: string): Post | null {
+  const filePath = path.join(dir, \`\${slug}.mdx\`);
   if (!fs.existsSync(filePath)) return null;
   const raw = fs.readFileSync(filePath, 'utf-8');
   const { data, content } = matter(raw);
@@ -289,6 +283,36 @@ export function getPost(slug: string): Post | null {
     wordCount: data.wordCount ?? 0,
     content,
   };
+}
+
+export function getAllPostSlugs(): string[] {
+  return getSlugsIn(POSTS_DIR);
+}
+
+export function getAllPosts(): PostMeta[] {
+  return getAllPostSlugs()
+    .map((slug) => getPost(slug))
+    .filter((p): p is Post => p !== null)
+    .sort((a, b) => (a.date < b.date ? 1 : -1));
+}
+
+export function getPost(slug: string): Post | null {
+  return getEntryIn(POSTS_DIR, slug);
+}
+
+export function getAllDirectorySlugs(): string[] {
+  return getSlugsIn(DIRECTORIES_DIR);
+}
+
+export function getAllDirectories(): PostMeta[] {
+  return getAllDirectorySlugs()
+    .map((slug) => getDirectory(slug))
+    .filter((p): p is Post => p !== null)
+    .sort((a, b) => (a.date < b.date ? 1 : -1));
+}
+
+export function getDirectory(slug: string): Post | null {
+  return getEntryIn(DIRECTORIES_DIR, slug);
 }
 `;
 
@@ -454,6 +478,80 @@ async function ensureBlogScaffold(siteUrl: string): Promise<void> {
   logger.success('Publisher', 'Blog scaffold ready');
 }
 
+// ── Sitemap — Next.js: dynamic scaffold (one-time); HTML: static, updated per-publish ─
+
+function buildSitemapTs(siteUrl: string): string {
+  const base = siteUrl.replace(/\/$/, '');
+  return `import type { MetadataRoute } from 'next';
+import { getAllPosts, getAllDirectories } from '@/lib/posts';
+
+const SITE_URL = '${base}';
+
+export default function sitemap(): MetadataRoute.Sitemap {
+  const posts = getAllPosts();
+  const directories = getAllDirectories();
+
+  return [
+    { url: SITE_URL, lastModified: new Date() },
+    { url: \`\${SITE_URL}/blog\`, lastModified: new Date() },
+    ...posts.map((p) => ({ url: \`\${SITE_URL}/blog/\${p.slug}\`, lastModified: p.date ? new Date(p.date) : new Date() })),
+    ...directories.map((d) => ({ url: \`\${SITE_URL}/directories/\${d.slug}\`, lastModified: d.date ? new Date(d.date) : new Date() })),
+  ];
+}
+`;
+}
+
+async function ensureSitemap(siteUrl: string): Promise<void> {
+  const sha = await getFileSha('src/app/sitemap.ts');
+  if (sha) {
+    logger.info('Publisher', '  src/app/sitemap.ts — already exists, skipping');
+    return;
+  }
+  logger.info('Publisher', '  Creating src/app/sitemap.ts…');
+  await commitFile('src/app/sitemap.ts', buildSitemapTs(siteUrl), 'chore: add dynamic sitemap.ts');
+  logger.success('Publisher', '  sitemap.ts created — updates automatically as posts/directories are published');
+}
+
+const SITEMAP_XML_PATH = 'sitemap.xml';
+
+function buildSitemapXmlScaffold(): string {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+<!-- URLS_START -->
+</urlset>
+`;
+}
+
+async function updateHtmlSitemap(pageUrl: string, lastmod: string): Promise<void> {
+  const urlEntry = `  <url>\n    <loc>${pageUrl}</loc>\n    <lastmod>${lastmod}</lastmod>\n  </url>`;
+  const existingSha = await getFileSha(SITEMAP_XML_PATH);
+
+  if (!existingSha) {
+    logger.info('Publisher', 'Creating sitemap.xml…');
+    const scaffold = buildSitemapXmlScaffold().replace('<!-- URLS_START -->', `<!-- URLS_START -->\n${urlEntry}`);
+    await commitFile(SITEMAP_XML_PATH, scaffold, 'chore: create sitemap.xml');
+    return;
+  }
+
+  const res = await ghFetch(`/repos/${GITHUB_REPO}/contents/${SITEMAP_XML_PATH}?ref=${GITHUB_BRANCH}`);
+  if (!res.ok) throw new Error(`Could not fetch ${SITEMAP_XML_PATH}: ${res.status}`);
+  const data = await res.json() as { content: string; sha: string };
+  const current = Buffer.from(data.content.replace(/\n/g, ''), 'base64').toString('utf-8');
+
+  if (!current.includes('<!-- URLS_START -->')) {
+    logger.warn('Publisher', 'sitemap.xml missing <!-- URLS_START --> marker — skipping update');
+    return;
+  }
+  if (current.includes(`<loc>${pageUrl}</loc>`)) {
+    logger.info('Publisher', 'sitemap.xml already contains this URL — skipping');
+    return;
+  }
+
+  const updated = current.replace('<!-- URLS_START -->', `<!-- URLS_START -->\n${urlEntry}`);
+  await commitFile(SITEMAP_XML_PATH, updated, `chore: add ${pageUrl} to sitemap`, data.sha);
+  logger.success('Publisher', 'sitemap.xml updated');
+}
+
 // ── Main publish function ─────────────────────────────────────────────────────
 
 export interface PublishResult {
@@ -474,13 +572,20 @@ export async function publishArticle(article: Article, opts: { contentPath?: str
   const contentPath = opts.contentPath ?? GITHUB_CONTENT_PATH;
   const siteUrl = opts.siteUrl ?? process.env.SITE_URL ?? '';
   const isHtmlSite = (opts.siteType ?? SITE_TYPE) === 'html';
+  const isDirectory = contentPath !== GITHUB_CONTENT_PATH;
+  const pageUrl = `${siteUrl.replace(/\/$/, '')}/${isDirectory ? 'directories' : 'blog'}/${article.slug}`;
+  const lastmod = new Date().toISOString().slice(0, 10);
 
   if (isHtmlSite) {
     // HTML sites: update the blog index on every publish
     await updateHtmlBlogIndex(article, siteUrl);
-  } else if (contentPath === GITHUB_CONTENT_PATH) {
+    await updateHtmlSitemap(pageUrl, lastmod);
+  } else {
     // Next.js sites: scaffold blog pages on first publish only
-    await ensureBlogScaffold(siteUrl);
+    if (contentPath === GITHUB_CONTENT_PATH) await ensureBlogScaffold(siteUrl);
+    // sitemap.ts is dynamic (reads getAllPosts/getAllDirectories at request time), so it
+    // only ever needs to be scaffolded once — after that it stays current automatically.
+    await ensureSitemap(siteUrl);
   }
 
   const ext = isHtmlSite ? 'html' : 'mdx';
