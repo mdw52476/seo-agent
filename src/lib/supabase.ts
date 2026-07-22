@@ -3,7 +3,12 @@ import { createClient } from '@supabase/supabase-js';
 import ws from 'ws';
 
 const url = process.env.SUPABASE_URL ?? '';
-const key = process.env.SUPABASE_ANON_KEY ?? '';
+// Service role key bypasses RLS -- required since this client has no user session
+// (it's a trusted backend process the dashboard already scoped to a single SITE_ID,
+// not an end-user request). Falls back to the anon key only so the client isn't
+// null if the service key isn't configured yet; writes will still fail under RLS
+// in that case.
+const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || '';
 
 export const supabase = url && key
   ? createClient(url, key, { realtime: { transport: ws } })

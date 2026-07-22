@@ -5,14 +5,19 @@
  * Vercel detects the push and auto-deploys the site.
  *
  * Required env vars:
- *   GITHUB_TOKEN       — Personal Access Token with repo scope
- *   GITHUB_REPO        — e.g. your-username/your-repo
- *   GITHUB_BRANCH      — default: main
- *   GITHUB_CONTENT_PATH — default: content/posts
+ *   GITHUB_TOKEN   — Personal Access Token with repo scope
+ *   GITHUB_REPO    — e.g. your-username/your-repo
+ *   GITHUB_BRANCH  — default: main
+ *
+ * Blog post content path is fixed at content/posts — not configurable. A
+ * misconfigured GITHUB_CONTENT_PATH previously sent a post to the wrong
+ * location silently; posts.ts only ever reads from content/posts, so this
+ * can't be allowed to drift.
  */
 
 
 import Anthropic from '@anthropic-ai/sdk';
+import sanitizeHtml from 'sanitize-html';
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { crawlPage } from '../lib/crawler.js';
@@ -24,8 +29,20 @@ const anthropic = new Anthropic();
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN ?? '';
 const GITHUB_REPO = process.env.GITHUB_REPO ?? '';
 const GITHUB_BRANCH = process.env.GITHUB_BRANCH ?? 'main';
-const GITHUB_CONTENT_PATH = process.env.GITHUB_CONTENT_PATH ?? 'content/posts';
+const GITHUB_CONTENT_PATH = 'content/posts';
 const SITE_TYPE = (process.env.SITE_TYPE ?? 'nextjs') as 'nextjs' | 'html';
+
+// Matches the allowlist enforced by sanitize-html on the website side — sanitizing
+// here too means the tool never generates markup that gets silently stripped
+// downstream, and never ships something unsafe in the first place.
+const ALLOWED_TAGS = ['h2', 'h3', 'h4', 'p', 'br', 'hr', 'strong', 'em', 'b', 'i', 'u', 's', 'a', 'ul', 'ol', 'li', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'blockquote', 'code', 'pre'];
+
+function sanitizeArticleContent(html: string): string {
+  return sanitizeHtml(html, {
+    allowedTags: ALLOWED_TAGS,
+    allowedAttributes: { a: ['href', 'title'] },
+  });
+}
 
 const GH_API = 'https://api.github.com';
 
@@ -110,9 +127,9 @@ async function commitFile(
 // ── MDX formatter ─────────────────────────────────────────────────────────────
 
 function htmlToMdxBody(html: string): string {
-  // The article content is already clean HTML from the writer.
-  // We wrap it in an MDX-compatible way — raw HTML is valid in MDX.
-  return html.trim();
+  // Raw HTML is valid in MDX — sanitize before it ever reaches the repo, not
+  // just relying on the website's own sanitizer to clean up afterward.
+  return sanitizeArticleContent(html).trim();
 }
 
 function buildMdx(article: Article): string {
@@ -147,7 +164,7 @@ function buildHtml(article: Article): string {
   <article>
     <h1>${title}</h1>
     <p class="post-date">${date}</p>
-    ${article.content}
+    ${sanitizeArticleContent(article.content)}
   </article>
   <p><a href="/blog/">← Back to blog</a></p>
 </body>
@@ -266,10 +283,12 @@ function loadLayoutMd(): string {
   return existsSync(p) ? readFileSync(p, 'utf-8') : '';
 }
 
-// posts.ts is always the same — it's a data utility, not a UI component
+// posts.ts is always the same — it's a data utility, not a UI component.
+// Deliberately zero external dependencies (no gray-matter) — a missing-dependency
+// build failure on the target site is exactly the kind of bug this file must
+// never be able to cause.
 const POSTS_TS = `import fs from 'fs';
 import path from 'path';
-import matter from 'gray-matter';
 
 const POSTS_DIR = path.join(process.cwd(), 'content/posts');
 const DIRECTORIES_DIR = path.join(process.cwd(), 'content/directories');
@@ -287,6 +306,20 @@ export interface Post extends PostMeta {
   content: string;
 }
 
+function parseFrontmatter(raw: string): { data: Record<string, string | number>; content: string } {
+  const match = raw.match(/^---\\r?\\n([\\s\\S]*?)\\r?\\n---\\r?\\n?([\\s\\S]*)$/);
+  if (!match) return { data: {}, content: raw };
+  const [, fm, content] = match;
+  const data: Record<string, string | number> = {};
+  for (const line of fm.split(/\\r?\\n/)) {
+    const m = line.match(/^([a-zA-Z0-9_]+):\\s*(.*)$/);
+    if (!m) continue;
+    const raw = m[2].trim();
+    data[m[1]] = /^".*"$/.test(raw) ? raw.slice(1, -1).replace(/\\\\"/g, '"') : /^-?\\d+(\\.\\d+)?$/.test(raw) ? Number(raw) : raw;
+  }
+  return { data, content };
+}
+
 function getSlugsIn(dir: string): string[] {
   if (!fs.existsSync(dir)) return [];
   return fs
@@ -299,14 +332,14 @@ function getEntryIn(dir: string, slug: string): Post | null {
   const filePath = path.join(dir, \`\${slug}.mdx\`);
   if (!fs.existsSync(filePath)) return null;
   const raw = fs.readFileSync(filePath, 'utf-8');
-  const { data, content } = matter(raw);
+  const { data, content } = parseFrontmatter(raw);
   return {
     slug,
-    title: data.title ?? slug,
-    date: data.date ?? '',
-    description: data.description ?? '',
-    keyword: data.keyword ?? '',
-    wordCount: data.wordCount ?? 0,
+    title: String(data.title ?? slug),
+    date: String(data.date ?? ''),
+    description: String(data.description ?? ''),
+    keyword: String(data.keyword ?? ''),
+    wordCount: Number(data.wordCount ?? 0),
     content,
   };
 }
