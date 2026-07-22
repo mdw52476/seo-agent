@@ -23,7 +23,13 @@ function loadContextFiles(): { layout: string; voice: string; skill: string } {
   };
   const layout = read('site-layout.md');
   const voice = read('voice-guide.md');
-  const skill = read('SKILL.md');
+  // A site's own SKILL.md always wins; fall back to the tool's bundled default
+  // so writing quality doesn't depend on the user having set one up yet.
+  let skill = read('SKILL.md');
+  if (!skill.trim()) {
+    const defaultPath = join(process.cwd(), 'defaults', 'SKILL.md');
+    skill = existsSync(defaultPath) ? readFileSync(defaultPath, 'utf-8') : '';
+  }
   if (!layout) logger.warn('ArticleWriter', 'site-layout.md not found — run "fingerprint <url>" first');
   return { layout, voice, skill };
 }
