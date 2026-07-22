@@ -16,6 +16,14 @@ import { researchKeywords } from './keyword-researcher.js';
 import { buildContentPlan } from './content-planner.js';
 import type { SiteAnalysis, PlannedArticle, Article } from '../lib/types.js';
 
+function buildContextBlock(layout: string, voice: string, skill: string): string {
+  return [
+    layout && `## Site Layout & Structure\n${layout}`,
+    voice && `## Voice & Writing Style\n${voice}`,
+    skill && `## AI-Tell Rules to Avoid\n${skill}\n\nThe rules above are requirements, not suggestions — this is not optional style guidance. Any rule labeled "PRIME DIRECTIVE" is absolute and non-negotiable, with zero exceptions outside of quoted dialogue. Before finalizing your output, re-read it specifically checking for violations of every PRIME DIRECTIVE rule (e.g. banned punctuation or words, sentence-structure limits) and correct every one you find.`,
+  ].filter(Boolean).join('\n\n---\n\n');
+}
+
 function loadContextFiles(): { layout: string; voice: string; skill: string } {
   const read = (name: string) => {
     const p = join(process.cwd(), name);
@@ -71,12 +79,7 @@ async function writeDraft(
   logger.info('ArticleWriter', `Writing draft: "${article.title}"…`);
 
   const { layout, voice, skill } = loadContextFiles();
-
-  const contextBlock = [
-    layout && `## Site Layout & Structure\n${layout}`,
-    voice && `## Voice & Writing Style\n${voice}`,
-    skill && `## AI-Tell Rules to Avoid\n${skill}`,
-  ].filter(Boolean).join('\n\n---\n\n');
+  const contextBlock = buildContextBlock(layout, voice, skill);
 
   const systemPrompt = contextBlock
     ? `${DRAFT_SYSTEM}\n\n---\n\n${contextBlock}`
@@ -179,11 +182,7 @@ async function reflectAndRevise(
   logger.info('ArticleWriter', 'Running reflection pass…');
 
   const { layout, voice, skill } = loadContextFiles();
-  const contextBlock = [
-    layout && `## Site Layout & Structure\n${layout}`,
-    voice && `## Voice & Writing Style\n${voice}`,
-    skill && `## AI-Tell Rules to Avoid\n${skill}`,
-  ].filter(Boolean).join('\n\n---\n\n');
+  const contextBlock = buildContextBlock(layout, voice, skill);
 
   const reflectionSystem = contextBlock
     ? `${REFLECTION_SYSTEM}\n\n---\n\n${contextBlock}`
@@ -204,6 +203,7 @@ CHECKS TO PERFORM:
 3. Confirm the target keyword "${article.keyword}" appears naturally 6-10 times
 4. Verify the article genuinely serves "${site.targetAudience}" — add niche-specific context if missing
 5. Ensure the final CTA is relevant to the site's niche and references ${site.url}
+6. Re-scan specifically for violations of the AI-Tell Rules in the system prompt, especially any rule marked PRIME DIRECTIVE (e.g. banned punctuation or words, sentence-structure limits) — these must be fully corrected with zero exceptions outside quoted dialogue
 
 ARTICLE TO REVIEW:
 ${draft}
